@@ -8,8 +8,9 @@
   - [Environment](#environment)
   - [Prerequisites](#prerequisites)
   - [Part 1 - Download the image of a running VM in OpenStack](#part-1---download-the-image-of-a-running-vm-in-openstack)
-  - [Part 2 - Upload the VM image to OpenShift Virtualization](#part-2---upload-the-vm-image-to-openshift-virtualization)
-  - [Part 3 - Start the migrated VM in OpenShift Virtualization](#part-3---start-the-migrated-vm-in-openshift-virtualization)
+  - [Part 2 - Create Storage Mapping](#part-2---create-storage-mapping)
+  - [Part 3 - Create Network Mapping](#part-3---create-network-mapping)
+  - [Part 4 - Start the migrated VM in OpenShift Virtualization](#part-4---start-the-migrated-vm-in-openshift-virtualization)
 <!-- TOC -->
 
 
@@ -29,15 +30,17 @@ The OpenStack environment has 2 networks that the VMs can connect to - an intern
 
 ![image info](./pictures/openstack-network.png)
 
-Both these networks have to be mapped to equivalent networks in the OpenShift cluster. Hence, there are two network interfaces enabled on the worker nodes of the OpenShift cluster.
+Both these networks have to be mapped to equivalent networks in the OpenShift cluster. Hence, there are two network interfaces enabled on the worker node(s) of the OpenShift cluster. 
+The OpenStack AIO host and the OpenShift cluster worker node(s) are on the same network subnet. 
 
 ## Prerequisites
 
-In the jumpbox, install -
+* In the jumpbox, install -
  * [OpenStack command-line client](https://docs.openstack.org/newton/user-guide/common/cli-install-openstack-command-line-clients.html)
  * [OpenShift CLI](https://docs.openshift.com/container-platform/4.6/cli_reference/openshift_cli/getting-started-cli.html)
 
-Login to both OpenStack and OpenShift via the command-line from the jumpbox.
+* Login to both OpenStack and OpenShift via the command-line from the jumpbox
+* Install Container-native Virtualization (CNV) operator in the OpenShift cluster
 
 ## Part 1 - Download the image of a running VM in OpenStack 
 
@@ -246,9 +249,13 @@ Format specific information:
     extended l2: false
 ```
 
-## Part 2 - Upload the VM image to OpenShift Virtualization
+While migrating a VM from a source to destination host, VM's storage and network configurations have to be created at the destination host, which are equivalent to the ones the VM had in the source host. Now that the VM's image has been downloaded from the source host, equivalent storage mapping can be created.
 
-The qcow2 image can be uploaded from jumpbox's local storage to OpenShift Virtualization using the [virtctl client](https://docs.openshift.com/container-platform/4.8/virt/install/virt-installing-virtctl.html). OpenShift Virtualization uses [Containerized Data Importer (CDI)](https://docs.openshift.com/container-platform/4.7/virt/virtual_machines/virtual_disks/virt-uploading-local-disk-images-virtctl.html) to import a VM image into a persistent volume claim (PVC) by using a data volume.
+## Part 2 - Create Storage Mapping
+
+In case of OpenStack to OpenShift VM migration, equivalent storage configuration for the VM is created in the OpenShift cluster by creating a PVC with the required image size for the VM to bind to.
+
+OpenShift Virtualization uses [Containerized Data Importer (CDI)](https://docs.openshift.com/container-platform/4.7/virt/virtual_machines/virtual_disks/virt-uploading-local-disk-images-virtctl.html) to import a VM image into a persistent volume claim (PVC) by using a data volume.
 
 Create a *DataVolume* object with *upload* data source to use for uploading the local VM image
 
@@ -284,10 +291,18 @@ While uploading images using CDI, its SSL certificates must be trusted by the br
 oc whoami --show-console | sed 's/console-openshift-console/cdi-uploadproxy-openshift-cnv/'
 ```
 
-Now, upload the VM image using the parameters defined in the previosu step
+The qcow2 image can be uploaded from jumpbox's local storage to OpenShift Virtualization using the [virtctl client](https://docs.openshift.com/container-platform/4.8/virt/install/virt-installing-virtctl.html) that specifies the parameters defined above
 
 ```
-virtctl image-upload dv fedora-dv --size=15Gi --image-path=/root/fedora_img_download.qcow2  --insecure
+# virtctl image-upload dv fedora-dv --size=15Gi --image-path=/root/fedora_img_download.qcow2  --insecure
+Using existing PVC migration/fedora-dv
+Uploading data to https://cdi-uploadproxy-openshift-cnv.apps.ocpd.example.com
+
+ 1.96 GiB / 1.96 GiB [=========================================================================================================================================================================] 100.00% 23s
+
+Uploading data completed successfully, waiting for processing to complete, you can hit ctrl-c without interrupting the progress
+Processing completed successfully
+Uploading /root/fedora_img_download.qcow2 completed successfully
 ```
 
 Wait until the upload is completed. Ensure that the datavolume upload succeeded and the PVC was created successfully 
@@ -304,4 +319,86 @@ NAME        STATUS   VOLUME              CAPACITY   ACCESS MODES   STORAGECLASS 
 fedora-dv   Bound    local-pv-64fe52ca   372Gi      RWO            lvstore        3m28s
 ```
 
-## Part 3 - Start the migrated VM in OpenShift Virtualization
+With this the required storage mapping for the VM is created. Now the network mapping can be created.
+
+## Part 3 - Create Network Mapping
+
+
+As the OpenStack environment had two networks in it, the two network interfaces enabled on the worker node(s) of the OpenShift cluster will be used for creating a network mapping. One thing to be noted in case of network mapping is that the network configurations of the VM like IP address, MAC addresses, etc. are preserved during migration. 
+
+The *Network100* private network in OpenStack can be mapped in 2 ways - 
+* It can be mapped to the default pod network of OpenShift cluster, in which case the IP address of the VM associated with this network will change as the CIDR ranges are different for the *Network100* private network and pod network. If the internal communication between VMs connected through this network are IP address independent, this mapping can be used. 
+* It can be mapped to a new internal network by creating a bridge interface that is attached to a third network interface on the OpenShift worker node(s). The *Network100* private network IP addresses of the VM can be retained in this case.
+
+
+The *ExternalNet* external network in OpenStack can be mapped to an equivalent network configuration in the following way
+
+Create a bridge interface which attaches to the second network interface enabled on the OpenShift cluster worker node(s) by creating a *Node Network Configuration Policy*
+
+```
+cat << EOF | oc create -f -
+apiVersion: nmstate.io/v1
+kind: NodeNetworkConfigurationPolicy
+metadata:
+  name: eno2-br-nncp
+spec:
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+  desiredState:
+    interfaces:
+      - name: br1
+        description: Linux bridge with eno2 as a port
+        type: linux-bridge
+        state: up
+        ipv4:
+          enabled: false
+          dhcp: false
+        bridge:
+          options:
+            stp:
+              enabled: false
+          port:
+            - name: eno2
+EOF
+```
+
+Change the name of the second network interface if its not *eno2*.
+
+The VMs in a specific namespace in the OpenShift Virtualization cluster can connect to additional networks using a custom resource that exposes layer-2 devices called *Network Attachment Definition* 
+
+```
+cat << EOF | oc apply -f -
+apiVersion: "k8s.cni.cncf.io/v1"
+kind: NetworkAttachmentDefinition
+metadata:
+  name: tuning-bridge
+  namespace: migration
+  annotations:
+    k8s.v1.cni.cncf.io/resourceName: bridge.network.kubevirt.io/br1
+spec:
+  config: '{
+    "cniVersion": "0.3.1",
+    "name": "tuning-bridge",
+    "plugins": [
+      {
+        "type": "cnv-bridge",
+        "bridge": "br1"
+      },
+      {
+        "type": "tuning"
+      }
+    ]
+  }'
+EOF
+```
+
+
+
+**TODO : EDIT TO MAKE IT CLEARER - As the OpenStack AIO host and the OpenShift cluster worker node(s) are on the same network subnet, the interface connected to *ExternalNet* external network and the secondary interface the bridge interface connects to are on the same subnet. Hence the VM's *ExternalNet*
+network IP address in OpenStack can be retained in OpenShift Virtualization as well.** 
+
+With this the required network configuration mapping for the VM is created. Now the migrated VM can be started by associating it with the created storage and network mappings.
+
+## Part 4 - Start the migrated VM in OpenShift Virtualization
+
+MAC address static via interface and ip static address via cloud-init
