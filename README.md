@@ -7,29 +7,15 @@
   - [Introduction](#introduction)
   - [Environment](#environment)
   - [Prerequisites](#prerequisites)
-  - [Your first VM](#your-first-vm)
-    - [Using the OpenShift UI](#using-the-openshift-ui)
-  - [Exposing a service from a VM](#exposing-a-service-from-a-vm)
-    - [VMIRS and Liveness Probes](#vmirs-and-liveness-probes)
-    - [Cleanup](#cleanup)
-  - [Making a persistent Fedora VM](#making-a-persistent-fedora-vm)
-    - [Migrating a vm from one host to another](#migrating-a-vm-from-one-host-to-another)
-    - [Cleanup](#cleanup-1)
-  - [Cloning a VM](#cloning-a-vm)
-    - [Cleanup](#cleanup-2)
-  - [Deploying a Windows VM from ISO](#deploying-a-windows-vm-from-iso)
-    - [Create new VM](#create-new-vm)
-    - [Accessing a Windows VM directly via RDP](#accessing-a-windows-vm-directly-via-rdp)
-  - [Importing a VM from vSphere](#importing-a-vm-from-vsphere)
-  - [Importing a VMDK](#importing-a-vmdk)
-    - [Cleanup](#cleanup-3)
-  - [Advanced networking examples](#advanced-networking-examples)
+  - [Part 1 - Download the image of a running VM in OpenStack](#part-1---download-the-image-of-a-running-vm-in-openstack)
+  - [Part 2 - Upload the VM image to OpenShift Virtualization](#part-2---upload-the-vm-image-to-openshift-virtualization)
+  - [Part 3 - Start the migrated VM in OpenShift Virtualization](#part-3---start-the-migrated-vm-in-openshift-virtualization)
 <!-- TOC -->
 
 
 ## Introduction
 
-OpenShift Virtualization is a feature of OpenShift that allows users to run and manage virtual machine workloads alongside container workloads on the same platform. It supports various virtualization tasks like creating new VMs, importing existing VMs from other platforms, managing network controllers and storage disks attached to VMs, etc. [[1]](https://docs.openshift.com/container-platform/4.8/virt/about-virt.html)
+[OpenShift Virtualization](https://docs.openshift.com/container-platform/4.8/virt/about-virt.html) is a feature of OpenShift that allows users to run and manage virtual machine workloads alongside container workloads on the same platform. It supports various virtualization tasks like creating new VMs, importing existing VMs from other platforms, managing network controllers and storage disks attached to VMs, etc.
 
 A major attraction of OpenShift Virtualization was the feature to migrate existing VMs from other platforms like VMware vSphere and Red Hat Virtualization to OpenShift Virtualization using the [Migration Toolkit for Virtualization (MTV)](https://access.redhat.com/documentation/en-us/migration_toolkit_for_virtualization/2.2/html/installing_and_using_the_migration_toolkit_for_virtualization/about-mtv) operator. But MTV operator does not support the migration of VMs (instances) from Red Hat OpenStack platform at the moment. This post will go through the steps to cold migrate a VM from Red Hat OpenStack platform to OpenShift Virtualization.
 
@@ -39,22 +25,25 @@ A major attraction of OpenShift Virtualization was the feature to migrate existi
 * [Red Hat OpenShift Container Platform 4.10 Single Node Installation](https://docs.openshift.com/container-platform/4.10/installing/installing_sno/install-sno-installing-sno.html)
 * JumpBox server to connect to OpenStack and OpenShift platforms 
 
-There are two networks associated with OpenStack - an internal private network of type Geneve (Network100) and an external physical network of type Flat (ExternalNet).
+The OpenStack environment has 2 networks that the VMs can connect to - an internal private network of type *Geneve* (Network100) and an external physical network of type *Flat* (ExternalNet).
 
 ![image info](./pictures/openstack-network.png)
 
 Both these networks have to be mapped to equivalent networks in the OpenShift cluster. Hence, there are two network interfaces enabled on the worker nodes of the OpenShift cluster.
 
 ## Prerequisites
+
 In the jumpbox, install -
  * [OpenStack command-line client](https://docs.openstack.org/newton/user-guide/common/cli-install-openstack-command-line-clients.html)
  * [OpenShift CLI](https://docs.openshift.com/container-platform/4.6/cli_reference/openshift_cli/getting-started-cli.html)
 
-Login to both OpenStack and OpenShift via the command-line.
+Login to both OpenStack and OpenShift via the command-line from the jumpbox.
 
 ## Part 1 - Download the image of a running VM in OpenStack 
 
-List VMs (instances) in OpenStack.
+For creating an image of a running VM (instance) in OpenStack, a new volume containing the VM's runtime ephemeral storage changes has to be created, which is then converted into an image that is downloaded. The detailed steps for the same using the OpenStack services *nova, cinder, and glance* are listed below - 
+
+List VMs (instances) in OpenStack
 
 ```
 # nova list
@@ -89,7 +78,7 @@ Server snapshotting... 100% complete
 Finished
 ```
 
-Get the snapshot ID
+Get the ID of the snapshot
 
 ```
 # cinder snapshot-list
@@ -104,8 +93,6 @@ Create a volume from the snapshot by mentioning the snapshot ID and required siz
 
 ```
 # cinder create --snapshot-id f9db22c5-a490-438b-b1d9-a1ca7701d733 15
-WARNING:cinderclient.shell:API version 3.68 requested, 
-WARNING:cinderclient.shell:downgrading to 3.59 based on server support.
 +--------------------------------+---------------------------------------+
 | Property                       | Value                                 |
 +--------------------------------+---------------------------------------+
@@ -154,12 +141,10 @@ Wait until the volume is created
 +--------------------------------------+------+-----------+------+---------------------------------------------+
 ```
 
-Attach the newly created volume to a new image that will be downloaded, using the volume ID
+Using the volume ID, attach the newly created volume to an image that can be downloaded
 
 ```
 # cinder upload-to-image ae640e30-e2ad-4513-bd69-35946647b98a fedora_img_download
-WARNING:cinderclient.shell:API version 3.68 requested, 
-WARNING:cinderclient.shell:downgrading to 3.59 based on server support.
 +---------------------+--------------------------------------+
 | Property            | Value                                |
 +---------------------+--------------------------------------+
@@ -168,7 +153,7 @@ WARNING:cinderclient.shell:downgrading to 3.59 based on server support.
 | display_description | None                                 |
 | id                  | ae640e30-e2ad-4513-bd69-35946647b98a |
 | image_id            | 0e953af4-093d-4dfc-a24d-a4959e7e816a |
-| image_name          | fedora_img_download                   |
+| image_name          | fedora_img_download                  |
 | protected           | False                                |
 | size                | 15                                   |
 | status              | uploading                            |
@@ -178,7 +163,7 @@ WARNING:cinderclient.shell:downgrading to 3.59 based on server support.
 +---------------------+--------------------------------------+
 ```
 
-Wait until the image is created and is in active state. You can check the status this way
+Wait until the image is created and is in active state. You can check the status this way using the image name
 
 ```
 # openstack image show fedora_img_download
@@ -192,7 +177,7 @@ Wait until the image is created and is in active state. You can check the status
 | id               | 0e953af4-093d-4dfc-a24d-a4959e7e816a                                                                   |
 | min_disk         | 0                                                                                                      |
 | min_ram          | 0                                                                                                      |
-| name             | fedora_img_download                                                                                     |
+| name             | fedora_img_download                                                                                    |
 | owner            | 51238d9ffcd9416da13ff40dd6086292                                                                       |
 | properties       | architecture='x86_64', description='Fedora Cloud Image', os_hidden='False', signature_verified='False' |
 | protected        | False                                                                                                  |
@@ -237,13 +222,13 @@ Download the volume image created using the image ID
 # glance image-download --file fedora_img_download.raw 070e9766-7a78-47dc-a02d-70531496624a
 ```
 
-Convert the image from raw format to qcow2 format
+Convert the image from raw format to qcow2 format using [QEMU disk image utility](https://www.qemu.org/download/#linux)
 
 ```
 # qemu-img convert -f raw -O qcow2 fedora_img_download.raw fedora_img_download.qcow2
 ```
 
-Ensure that the qcow2 image was created correctly
+The QEMU disk image utility can be used to get the expected virtual size of the image
 
 ```
 # qemu-img info fedora_img_download.qcow2 
@@ -261,5 +246,62 @@ Format specific information:
     extended l2: false
 ```
 
+## Part 2 - Upload the VM image to OpenShift Virtualization
 
+The qcow2 image can be uploaded from jumpbox's local storage to OpenShift Virtualization using the [virtctl client](https://docs.openshift.com/container-platform/4.8/virt/install/virt-installing-virtctl.html). OpenShift Virtualization uses [Containerized Data Importer (CDI)](https://docs.openshift.com/container-platform/4.7/virt/virtual_machines/virtual_disks/virt-uploading-local-disk-images-virtctl.html) to import a VM image into a persistent volume claim (PVC) by using a data volume.
 
+Create a *DataVolume* object with *upload* data source to use for uploading the local VM image
+
+```
+cat << EOF | oc create -f -
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: "true"
+    kubevirt.ui/provider: local-provider
+  name: fedora-dv
+  namespace: migration
+spec:
+  pvc:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 15Gi 
+    storageClassName: lvstore
+    volumeMode: Filesystem
+  source:
+    upload: {}
+EOF
+```
+
+Make sure to change the ```specs```attributes as per the underlying persistent storage setup of your OpenShift cluster. In this post, the OpenShift cluster has been setup on a single node that uses local volumes for persistent storage. Also change the ```name``` and ```namespace``` attribute as required. 
+
+While uploading images using CDI, its SSL certificates must be trusted by the browser. If a trusted CA is used for the OpenShift cluster certificates, this will be sufficient. If not, the cdi-uploadproxy-openshift-cnv application has to be browsed under the OpenShift cluster's ingress URL to accept its SSL certificate. Any 404 errors may be ignored during this process. The URL can be obtained using the following command
+
+```
+oc whoami --show-console | sed 's/console-openshift-console/cdi-uploadproxy-openshift-cnv/'
+```
+
+Now, upload the VM image using the parameters defined in the previosu step
+
+```
+virtctl image-upload dv fedora-dv --size=15Gi --image-path=/root/fedora_img_download.qcow2  --insecure
+```
+
+Wait until the upload is completed. Ensure that the datavolume upload succeeded and the PVC was created successfully 
+
+```
+# oc get dv -n migration
+NAME        PHASE       PROGRESS   RESTARTS   AGE
+fedora-dv   Succeeded   N/A                   2m26s
+```
+
+```
+oc get pvc -n migration
+NAME        STATUS   VOLUME              CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+fedora-dv   Bound    local-pv-64fe52ca   372Gi      RWO            lvstore        3m28s
+```
+
+## Part 3 - Start the migrated VM in OpenShift Virtualization
