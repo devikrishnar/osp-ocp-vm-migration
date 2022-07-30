@@ -11,8 +11,9 @@
   - [Part 2 - Create Storage Mapping](#part-2---create-storage-mapping)
   - [Part 3 - Create Network Mapping](#part-3---create-network-mapping)
   - [Part 4 - Start the migrated VM in OpenShift Virtualization](#part-4---start-the-migrated-vm-in-openshift-virtualization)
+  - [Future Work](#future-work)
+  - [References](#references)
 <!-- TOC -->
-
 
 ## Introduction
 
@@ -61,7 +62,7 @@ List VMs (instances) in OpenStack
 
 From the list, get the name of the VM you want to migrate. 
 
-In this post, I will be migrating the VM 'FedoraServer1'. There is a simple website running on an httpd server on the VM that displays the server's IP address. 
+In this post, I will be migrating the VM *FedoraServer1*. There is a web page hosted on an httpd server on the VM that displays the server's IP address. 
 
 ![image info](./pictures/osp-website.png)
 
@@ -251,6 +252,10 @@ Format specific information:
 
 While migrating a VM from a source to destination host, VM's storage and network configurations have to be created at the destination host, which are equivalent to the ones the VM had in the source host. Now that the VM's image has been downloaded from the source host, equivalent storage mapping can be created.
 
+Since the VM is shut down, the web page is unresponsive on reloading it. 
+
+![image info](./pictures/osp-website-down.png)
+
 ## Part 2 - Create Storage Mapping
 
 In case of OpenStack to OpenShift VM migration, equivalent storage configuration for the VM is created in the OpenShift cluster by creating a PVC with the required image size for the VM to bind to.
@@ -330,8 +335,7 @@ The *Network100* private network in OpenStack can be mapped in 2 ways -
 * It can be mapped to the default pod network of OpenShift cluster, in which case the IP address of the VM associated with this network will change as the CIDR ranges are different for the *Network100* private network and pod network. If the internal communication between VMs connected through this network are IP address independent, this mapping can be used. 
 * It can be mapped to a new internal network by creating a bridge interface that is attached to a third network interface on the OpenShift worker node(s). The *Network100* private network IP addresses of the VM can be retained in this case.
 
-
-The *ExternalNet* external network in OpenStack can be mapped to an equivalent network configuration in the following way
+The *ExternalNet* external network in OpenStack can be mapped to an equivalent network configuration in the following way -
 
 Create a bridge interface which attaches to the second network interface enabled on the OpenShift cluster worker node(s) by creating a *Node Network Configuration Policy*
 
@@ -362,7 +366,7 @@ spec:
 EOF
 ```
 
-Change the name of the second network interface if its not *eno2*.
+Change the name of the second network interface in the ```port-name``` attribute if its not *eno2*.
 
 The VMs in a specific namespace in the OpenShift Virtualization cluster can connect to additional networks using a custom resource that exposes layer-2 devices called *Network Attachment Definition* 
 
@@ -392,13 +396,57 @@ spec:
 EOF
 ```
 
-
-
 **TODO : EDIT TO MAKE IT CLEARER - As the OpenStack AIO host and the OpenShift cluster worker node(s) are on the same network subnet, the interface connected to *ExternalNet* external network and the secondary interface the bridge interface connects to are on the same subnet. Hence the VM's *ExternalNet*
 network IP address in OpenStack can be retained in OpenShift Virtualization as well.** 
 
 With this the required network configuration mapping for the VM is created. Now the migrated VM can be started by associating it with the created storage and network mappings.
 
+*Note*: In case you want to follow the second method for mapping OpenStack's internal network *Network100*, you need to create another bridge interface and make it available in the *migration* namespace using another *Node Network Configuration Policy* and *Network Attachment Definition* combo.
+
 ## Part 4 - Start the migrated VM in OpenShift Virtualization
 
-MAC address static via interface and ip static address via cloud-init
+The VM can be created using the ```feodra-vm.yml``` file
+
+```
+# oc apply -f fedora-vm.yml
+```
+
+To create a VM from the clone of the image loaded into the PVC created earlier, give the parameters of the PVC in the ```dataVolumeTemplates``` attribute. 
+
+The current YAML creates a VM that maps the *Network100* private network in OpenStack to the pod network in OpenShift. 
+To connect the VM to the secondary bridge interface, add the parameters of the *Network Attachment Definition* in the ```networks``` attribute. You can specify the static MAC address for the interface(s) in the ```interfaces``` attribute. The values given in the YAML are the ones the *FedoraServer1* VM had in OpenStack. You can also specify the static IP address that the VM's secondary interface is associated with in the ```cloudInitNoCloud-networkData```. This IP address value is again the one the *FedoraServer1* VM had in OpenStack. 
+
+Additional configurations like adding ssh key-pairs, restarting NetworkManager, running certain commands on boot, etc. can be added in the ```cloudInitNoCloud-userData``` attribute. 
+
+Start the VM
+
+```
+# virtctl start fedoraserver1 -n migration
+VM fedoraserver1 was scheduled to start
+```
+
+```
+# oc get vm -n migration
+NAME            AGE   STATUS    READY
+fedoraserver1   29m   Running   True
+```
+
+Once the VM is up and running, reload the web page hosted in the httpd server of the VM, and the web page would display the server's IP address, which remains the same after migration.
+
+![image info](./pictures/ocp-website.png)
+
+
+In this way we can migrate a VM from OpenStack to OpenShift virtualization keeping the workloads in the VM intact. 
+
+
+## Future Work
+
+* Perform warm migration of VMs between OpenStack and OpenShift Virtualization using [Change Block Tracking](https://wiki.openstack.org/wiki/Raksha).
+* **TODO - make it clearer** : Run an Ansible playbook post migration to configure network settings required by the VM
+
+## References 
+
+[Creating image of a volume in OpenStack](https://access.redhat.com/solutions/2885001)
+[Convert format of an image](https://docs.openstack.org/image-guide/convert-images.html)
+[Creating a VM in OpenShift Virtualization via CLI](https://docs.openshift.com/container-platform/4.10/virt/virtual_machines/virt-create-vms.html)
+[Create VM with a static IP address in OpenShift Virtualization](https://docs.openshift.com/container-platform/4.6/virt/virtual_machines/vm_networking/virt-configuring-ip-for-vms.html)

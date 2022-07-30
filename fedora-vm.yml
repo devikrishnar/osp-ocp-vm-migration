@@ -1,0 +1,84 @@
+apiVersion: kubevirt.io/v1alpha3
+metadata:
+  labels:
+    special: fedoraserver1
+  name: fedoraserver1
+kind: VirtualMachine
+spec:
+  running: false
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: fedoraserver1
+    spec:
+      networks:
+        - name: default
+          pod: {}
+        - multus:
+            networkName: tuning-bridge
+          name: nic-1
+      domain:
+        devices:
+          interfaces:
+            - masquerade: {}
+              macAddress: 'fa:16:3e:2d:f2:84'
+              name: default
+            - bridge: {}
+              macAddress: 'fa:16:3e:2c:17:a4'
+              model: virtio
+              name: nic-1
+          networkInterfaceMultiqueue: true
+          disks:
+          - disk:
+              bus: virtio
+            name: datavolumedisk
+          - disk:
+              bus: virtio
+            name: cloudinitdisk
+          rng: {}
+        machine:
+          type: ""
+        resources:
+          requests:
+            memory: 4Gi 
+      terminationGracePeriodSeconds: 0
+      volumes:
+        - dataVolume:
+            name: fedora-persist-dv
+          name: datavolumedisk
+        - cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth1: 
+                  addresses:
+                  - 192.168.11.84/24
+            userData: |
+              #cloud-config
+              hostname: fedora
+              user: fedora
+              password: 1234
+              chpasswd: { expire: False }
+              ssh_pwauth: True
+              disable_root: false
+              bootcmd:
+                - sudo route add -net 0.0.0.0 gw 192.168.11.254 netmask 0.0.0.0 metric 90 dev eth1 && sudo systemctl start httpd
+          name: cloudinitdisk
+  dataVolumeTemplates:
+    - metadata:
+        creationTimestamp: null
+        name: fedora-persist-dv
+        namespace: migration
+      spec:
+        source:
+          pvc:
+            name: fedora-dv
+            namespace: migration
+        storage:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 15Gi
+          storageClassName: lvstore
+          volumeMode: Filesystem
