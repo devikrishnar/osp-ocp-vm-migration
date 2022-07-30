@@ -446,7 +446,7 @@ In this way we can migrate a VM from OpenStack to OpenShift virtualization keepi
 
 ## References 
 
-[Creating image of a volume in OpenStack](https://access.redhat.com/solutions/2885001)
-[Convert format of an image](https://docs.openstack.org/image-guide/convert-images.html)
-[Creating a VM in OpenShift Virtualization via CLI](https://docs.openshift.com/container-platform/4.10/virt/virtual_machines/virt-create-vms.html)
-[Create VM with a static IP address in OpenShift Virtualization](https://docs.openshift.com/container-platform/4.6/virt/virtual_machines/vm_networking/virt-configuring-ip-for-vms.html)
+* [Creating image of a volume in OpenStack](https://access.redhat.com/solutions/2885001)
+* [Convert format of an image](https://docs.openstack.org/image-guide/convert-images.html)
+* [Creating a VM in OpenShift Virtualization via CLI](https://docs.openshift.com/container-platform/4.10/virt/virtual_machines/virt-create-vms.html)
+* [Create VM with a static IP address in OpenShift Virtualization](https://docs.openshift.com/container-platform/4.6/virt/virtual_machines/vm_networking/virt-configuring-ip-for-vms.html)
