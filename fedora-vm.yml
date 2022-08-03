@@ -61,8 +61,10 @@ spec:
               chpasswd: { expire: False }
               ssh_pwauth: True
               disable_root: false
-              bootcmd:
-                - sudo route add -net 0.0.0.0 gw 192.168.11.254 netmask 0.0.0.0 metric 90 dev eth1 && sudo systemctl start httpd
+              runcmd:
+                - [ sudo, nmcli, connection, modify, 'cloud-init eth1', ipv4.routes, "0.0.0.0/0 192.168.11.254"]
+                - [ sudo, nmcli, connection, modify, 'cloud-init eth1', "ipv4.route-metric", 90]
+                - [ sudo, nmcli, connection, up, 'cloud-init eth1']
           name: cloudinitdisk
   dataVolumeTemplates:
     - metadata:

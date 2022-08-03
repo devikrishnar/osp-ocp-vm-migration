@@ -56,27 +56,27 @@ List VMs (instances) in OpenStack.
 | ID                                   | Name               | Status | Networks                                              | Image                    | Flavor |
 +--------------------------------------+--------------------+--------+-------------------------------------------------------+--------------------------+--------+
 | a478c7a7-15c5-4cdd-a536-3f9f6030c0e2 | Windows2012Server1 | ACTIVE | ExternalNet=192.168.11.82; Network100=192.168.100.114 | N/A (booted from volume) | Large  |
-| 9e4e2e44-b54d-4ae8-9490-ff225305fdb1 | FedoraServer1      | ACTIVE | ExternalNet=192.168.11.84; Network100=192.168.100.102 | N/A (booted from volume) | Medium |
+| 9e4e2e44-b54d-4ae8-9490-ff225305fdb1 | fedoraserver1      | ACTIVE | ExternalNet=192.168.11.84; Network100=192.168.100.102 | N/A (booted from volume) | Medium |
 | 6f0113f1-afff-4bc4-a59e-768e4e1332a1 | CirrOSInstance1    | ACTIVE | Network100=192.168.100.110, 192.168.11.64             | N/A (booted from volume) | Tiny   |
 +--------------------------------------+--------------------+--------+-------------------------------------------------------+--------------------------+--------+
 ```
 
 From the list, get the name of the VM that is to be migrated. 
 
-In this post, I will be migrating the VM *FedoraServer1*. There is a web page hosted on an httpd server on the VM that displays the server's IP address. 
+In this post, I will be migrating the VM *fedoraserver1*. There is a web page hosted on an httpd server on the VM that displays the server's IP address. 
 
 ![image info](./pictures/osp-website.png)
 
 The VM would have to be stopped in order to cold migrate it. 
 
 ```
-# openstack server stop FedoraServer1
+# openstack server stop fedoraserver1
 # openstack server list
 +--------------------------------------+--------------------+---------+-------------------------------------------------------+--------------------------+--------+
 | ID                                   | Name               | Status  | Networks                                              | Image                    | Flavor |
 +--------------------------------------+--------------------+---------+-------------------------------------------------------+--------------------------+--------+
 | a478c7a7-15c5-4cdd-a536-3f9f6030c0e2 | Windows2012Server1 | ACTIVE  | ExternalNet=192.168.11.82; Network100=192.168.100.114 | N/A (booted from volume) | Large  |
-| 9e4e2e44-b54d-4ae8-9490-ff225305fdb1 | FedoraServer1      | SHUTOFF | ExternalNet=192.168.11.84; Network100=192.168.100.102 | N/A (booted from volume) | Medium |
+| 9e4e2e44-b54d-4ae8-9490-ff225305fdb1 | fedoraserver1      | SHUTOFF | ExternalNet=192.168.11.84; Network100=192.168.100.102 | N/A (booted from volume) | Medium |
 | 6f0113f1-afff-4bc4-a59e-768e4e1332a1 | CirrOSInstance1    | ACTIVE  | Network100=192.168.100.110, 192.168.11.64             | N/A (booted from volume) | Tiny   |
 +--------------------------------------+--------------------+---------+-------------------------------------------------------+--------------------------+--------+
 ```
@@ -88,7 +88,7 @@ Since the VM is shut down, the web page is unresponsive on reloading it.
 Once the VM has been shut down, create a snapshot of the VM by specifying the VM name.
 
 ```
-# openstack server image create --name fedora_img_snap FedoraServer1
+# openstack server image create --name fedora_img_snap fedoraserver1
 +------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
 | Field            | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 +------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -164,14 +164,14 @@ Wait until the volume is created.
 | 7580bd66-61f3-457e-8945-632b3ca450a6 | fedora_migrate_vol | available |   15 |                                             |
 | 9c927772-73de-4f56-a5bd-179b95d00c77 |                    | available |   10 |                                             |
 | 7313a2d2-988c-4bb2-9799-f5b63582c70e |                    | in-use    |   25 | Attached to Windows2012Server1 on /dev/vda  |
-| e321fdb8-ba6a-4b07-97ea-86119b5b35ad |                    | in-use    |   15 | Attached to FedoraServer1 on /dev/vda       |
+| e321fdb8-ba6a-4b07-97ea-86119b5b35ad |                    | in-use    |   15 | Attached to fedoraserver1 on /dev/vda       |
 | b4f6de2c-19bf-4b15-8e64-8e4da15e8417 |                    | in-use    |   10 | Attached to CirrOSInstance1 on /dev/vda     |
 +--------------------------------------+--------------------+-----------+------+---------------------------------------------+
 ```
 
 Using the volume ID, attach the newly created volume to an image by specifying the volume name and new image name.
 
-**TODO - Check when the bug fix for openstack command will be available in production (https://review.opendev.org/c/openstack/python-openstackclient/+/844268)**
+*TODO - Command with OpenStack resulting in below errror. Check when the bug fix for openstack command will be available in production (https://review.opendev.org/c/openstack/python-openstackclient/+/844268). Meanwhile use the alternative command.*
 ```
 # openstack image create --volume fedora_migrate_vol fedora_img_download
 upload_to_image() got an unexpected keyword argument 'visibility'
@@ -356,7 +356,7 @@ Now that storage for the VM has been configured in OpenShift Virtualization, VM'
 
 OpenShift virtualization provides layer-2 networking capabilities that allows VMs to connect to [multiple networks](https://docs.openshift.com/container-platform/4.3/cnv/cnv_virtual_machines/cnv_vm_networking/cnv-attaching-vm-multiple-networks.html) using the *Multus* plug-in. Network devices like SR-IOV, standard Linux host bridges, MACVLAN, and IPVLAN can be configured using this plug-in. In this post, additional networks will be setup using Linux bridges. 
 
-The image below shows the network settings of VM(s) in OpenStack before migration and it's equivalent settings in OpenShift Virtualization after migration. One thing to be noted is that the network parameters of the VM like IP address, MAC addresses, etc. are preserved during migration. 
+The image below shows the network settings of VM(s) in OpenStack before migration and it's equivalent settings in OpenShift Virtualization after migration. One thing to be noted is that the network parameters of the VM like IP address, MAC addresses, etc. have to be preserved during migration. 
 
 ![image info](./pictures/osp-ocp-network-setup.png)
 
@@ -442,9 +442,61 @@ The VM can be created using the ```feodra-vm.yml``` file.
 To create a VM from the clone of the image loaded into the PVC created earlier, give the parameters of the PVC in the ```dataVolumeTemplates``` attribute. 
 
 The current YAML creates a VM that maps the *Network100* private network in OpenStack to the pod network in OpenShift. 
-To connect the VM to the secondary bridge interface, add the parameters of the *Network Attachment Definition* in the ```networks``` attribute. You can specify the static MAC address for the interface(s) in the ```interfaces``` attribute. The values given in the YAML are the ones the *FedoraServer1* VM had in OpenStack. You can also specify the static IP address that the VM's secondary interface is associated with in the ```cloudInitNoCloud-networkData```. This IP address value is again the one the *FedoraServer1* VM had in OpenStack. 
+To connect the VM to the secondary bridge interface, add the parameters of the *Network Attachment Definition* in the ```networks``` attribute. 
 
-Additional configurations like adding ssh key-pairs, restarting NetworkManager, running certain commands on boot, etc. can be added in the ```cloudInitNoCloud-userData``` attribute. 
+```
+      networks:
+        - name: default
+          pod: {}
+        - multus:
+            networkName: tuning-bridge
+          name: nic-1
+```
+
+You can specify the static MAC address for the interface(s) in the ```interfaces``` attribute. The values given in the YAML are the ones the *fedoraserver1* VM had in OpenStack.
+
+```
+        devices:
+          interfaces:
+            - masquerade: {}
+              macAddress: 'fa:16:3e:2d:f2:84'
+              name: default
+            - bridge: {}
+              macAddress: 'fa:16:3e:2c:17:a4'
+              model: virtio
+              name: nic-1
+```
+
+You can also specify the static IP address that the VM's secondary interface is associated with in the ```cloudInitNoCloud-networkData```. This IP address value is again the one the *fedoraserver1* VM had in OpenStack. 
+
+```
+        - cloudInitNoCloud:
+            networkData: |
+              version: 2
+              ethernets:
+                eth1: 
+                  addresses:
+                  - 192.168.11.84/24
+```
+
+Additional configurations like adding ssh key-pairs, login credentials, restarting NetworkManager, running certain commands on boot, etc. can be added in the ```cloudInitNoCloud-userData``` attribute. Here ```runcmd``` is used to run certain network re-configuration commands specific to the workload runnning in the VM. The commands given under ```runcmd``` here are adding a static route to localhost (0.0.0.0) for the additional external network interface connection that was added previously. This is done so that the web server can be accessed via the VM's secondary network IP address. 
+
+```
+        - cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              hostname: fedora
+              user: fedora
+              password: 1234
+              chpasswd: { expire: False }
+              ssh_pwauth: True
+              disable_root: false
+              runcmd:
+                - [ sudo, nmcli, connection, modify, 'cloud-init eth1', ipv4.routes, "0.0.0.0/0 192.168.11.254"]
+                - [ sudo, nmcli, connection, modify, 'cloud-init eth1', "ipv4.route-metric", 90]
+                - [ sudo, nmcli, connection, up, 'cloud-init eth1']
+          name: cloudinitdisk
+```
 
 Start the VM.
 
