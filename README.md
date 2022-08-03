@@ -8,8 +8,8 @@
   - [Environment](#environment)
   - [Prerequisites](#prerequisites)
   - [Part 1 - Download the image of a running VM in OpenStack](#part-1---download-the-image-of-a-running-vm-in-openstack)
-  - [Part 2 - Create Storage Mapping](#part-2---create-storage-mapping)
-  - [Part 3 - Create Network Mapping](#part-3---create-network-mapping)
+  - [Part 2 - Configure Storage for VM in OpenShift Virtualization](#part-2---configure-storage-for-vm-in-openshift-virtualization)
+  - [Part 3 - Configure Network for VM in OpenShift Virtualization](#part-3---configure-network-for-vm-in-openshift-virtualization)
   - [Part 4 - Start the migrated VM in OpenShift Virtualization](#part-4---start-the-migrated-vm-in-openshift-virtualization)
   - [Future Work](#future-work)
   - [References](#references)
@@ -17,9 +17,9 @@
 
 ## Introduction
 
-[OpenShift Virtualization](https://docs.openshift.com/container-platform/4.8/virt/about-virt.html) is a feature of OpenShift that allows users to run and manage virtual machine workloads alongside container workloads on the same platform. It supports various virtualization tasks like creating new VMs, importing existing VMs from other platforms, managing network controllers and storage disks attached to VMs, etc.
+[OpenShift Virtualization](https://docs.openshift.com/container-platform/4.8/virt/about-virt.html) is a feature of OpenShift that allows users to run and manage virtual machine workloads alongside container workloads on the same platform. It supports various virtualization tasks like creating new VMs, importing existing VMs from other platforms, managing network controllers and storage disks attached to VMs, etc. The [cnv-demos repo](https://github.com/rh-telco-tigers/cnv-demos) goes through the various features of OpenShift Virtualization.
 
-A major attraction of OpenShift Virtualization was the feature to migrate existing VMs from other platforms like VMware vSphere and Red Hat Virtualization to OpenShift Virtualization using the [Migration Toolkit for Virtualization (MTV)](https://access.redhat.com/documentation/en-us/migration_toolkit_for_virtualization/2.2/html/installing_and_using_the_migration_toolkit_for_virtualization/about-mtv) operator. But MTV operator does not support the migration of VMs (instances) from Red Hat OpenStack platform at the moment. This post will go through the steps to cold migrate a VM from Red Hat OpenStack platform to OpenShift Virtualization.
+A major attraction of OpenShift Virtualization is the feature to migrate existing VMs from other platforms like VMware vSphere and Red Hat Virtualization to OpenShift Virtualization using the [Migration Toolkit for Virtualization (MTV)](https://access.redhat.com/documentation/en-us/migration_toolkit_for_virtualization/2.2/html/installing_and_using_the_migration_toolkit_for_virtualization/about-mtv) operator. But MTV operator does not support the migration of VMs (instances) from Red Hat OpenStack platform at the moment. This post will go through the steps to cold migrate a VM from Red Hat OpenStack platform to OpenShift Virtualization.
 
 ## Environment
 
@@ -27,11 +27,12 @@ A major attraction of OpenShift Virtualization was the feature to migrate existi
 * [Red Hat OpenShift Container Platform 4.10 Single Node Installation](https://docs.openshift.com/container-platform/4.10/installing/installing_sno/install-sno-installing-sno.html)
 * JumpBox server to connect to OpenStack and OpenShift platforms. All the steps given below are performed in this jumpbox server.
 
-The OpenStack environment has 2 networks that the VMs can connect to - an internal private network of type *Geneve* (Network100) and an external physical network of type *Flat* (ExternalNet).
+The OpenStack environment has 2 networks that the VMs can connect to - an internal private network of type *Geneve* (called *Network100*) and an external physical network of type *Flat* (called *ExternalNet*).
 
 ![image info](./pictures/openstack-network.png)
 
-Both these networks have to be mapped to equivalent networks in the OpenShift cluster. Hence, there are two network interfaces enabled on the worker node(s) of the OpenShift cluster. 
+Since the VMs have to connect to either the same or equivalent networks in OpenShift Virtualization after migration, there are two network interfaces enabled on the worker node(s) of the OpenShift cluster. 
+
 The OpenStack AIO host and the OpenShift cluster worker node(s) are on the same network subnet. 
 
 ## Prerequisites
@@ -170,7 +171,7 @@ Wait until the volume is created.
 
 Using the volume ID, attach the newly created volume to an image by specifying the volume name and new image name.
 
-**TODO - Check when the bug fix will be available in production (https://review.opendev.org/c/openstack/python-openstackclient/+/844268)**
+**TODO - Check when the bug fix for openstack command will be available in production (https://review.opendev.org/c/openstack/python-openstackclient/+/844268)**
 ```
 # openstack image create --volume fedora_migrate_vol fedora_img_download
 upload_to_image() got an unexpected keyword argument 'visibility'
@@ -279,9 +280,9 @@ Format specific information:
     extended l2: false
 ```
 
-While migrating a VM from a source to destination host, VM's storage and network configurations have to be created at the destination host, which are equivalent to the ones the VM had in the source host. Now that the VM's image has been downloaded from the source host, equivalent storage mapping can be created.
+While migrating a VM from a source to destination host, VM's storage and network configurations have to be recreated at the destination host, which are equivalent to the ones the VM had in the source host. Now that the VM's image has been downloaded from OpenStack, equivalent storage for the VM can be configured in OpenShift Virtualization.
 
-## Part 2 - Create Storage Mapping
+## Part 2 - Configure Storage for VM in OpenShift Virtualization
 
 In case of OpenStack to OpenShift VM migration, equivalent storage configuration for the VM is created in the OpenShift cluster by creating a PVC with the required image size for the VM to bind to.
 
@@ -349,18 +350,21 @@ NAME        STATUS   VOLUME              CAPACITY   ACCESS MODES   STORAGECLASS 
 fedora-dv   Bound    local-pv-64fe52ca   372Gi      RWO            lvstore        3m28s
 ```
 
-With this the required storage mapping for the VM is created. Now the network mapping can be created.
+Now that storage for the VM has been configured in OpenShift Virtualization, VM's network configurations can be setup next.
 
-## Part 3 - Create Network Mapping
+## Part 3 - Configure Network for VM in OpenShift Virtualization
 
+OpenShift virtualization provides layer-2 networking capabilities that allows VMs to connect to [multiple networks](https://docs.openshift.com/container-platform/4.3/cnv/cnv_virtual_machines/cnv_vm_networking/cnv-attaching-vm-multiple-networks.html) using the *Multus* plug-in. Network devices like SR-IOV, standard Linux host bridges, MACVLAN, and IPVLAN can be configured using this plug-in. In this post, additional networks will be setup using Linux bridges. 
 
-As the OpenStack environment had two networks in it, the two network interfaces enabled on the worker node(s) of the OpenShift cluster will be used for creating a network mapping. One thing to be noted in case of network mapping is that the network configurations of the VM like IP address, MAC addresses, etc. are preserved during migration. 
+The image below shows the network settings of VM(s) in OpenStack before migration and it's equivalent settings in OpenShift Virtualization after migration. One thing to be noted is that the network parameters of the VM like IP address, MAC addresses, etc. are preserved during migration. 
 
-The *Network100* private network in OpenStack can be mapped in 2 ways - 
-* It can be mapped to the default pod network of OpenShift cluster, in which case the IP address of the VM associated with this network will change as the CIDR ranges are different for the *Network100* private network and pod network. If the internal communication between VMs connected through this network are IP address independent, this mapping can be used. 
-* It can be mapped to a new internal network by creating a bridge interface that is attached to a third network interface on the OpenShift worker node(s). The *Network100* private network IP addresses of the VM can be retained in this case.
+![image info](./pictures/osp-ocp-network-setup.png)
 
-The *ExternalNet* external network in OpenStack can be mapped to an equivalent network configuration in the following way -
+An equivalent network configuration for *Network100* private network in OpenStack can be created in OpenShift Virtualization in 2 ways - 
+* Use the default pod network of OpenShift cluster as the internal private network, in which case the IP address of the VM associated with this network will change as the CIDR ranges are different for the *Network100* private network and pod network. If the internal communication between VMs connected through this network are IP address independent, this setup can be used. 
+* Create a new internal private network by creating a bridge interface that is attached to a third network interface on the OpenShift worker node(s). The *Network100* private network IP address of the VM can be retained in this case.
+
+As seen in the image above, both OpenStack AIO host and OpenShift cluster worker node(s) are connected to the same external physical network. Hence the VMs in OpenShift Virtualization can connect to the same external network in OpenStack by creating a bridge interface attached to the second interface on the OpenShift cluster worker node(s). This can be done in the following way - 
 
 Create a bridge interface which attaches to the second network interface enabled on the OpenShift cluster worker node(s) by creating a *Node Network Configuration Policy*.
 
@@ -421,12 +425,11 @@ spec:
 EOF
 ```
 
-**TODO : EDIT TO MAKE IT CLEARER - As the OpenStack AIO host and the OpenShift cluster worker node(s) are on the same network subnet, the interface connected to *ExternalNet* external network and the secondary interface the bridge interface connects to are on the same subnet. Hence the VM's *ExternalNet*
-network IP address in OpenStack can be retained in OpenShift Virtualization as well.** 
+As the external network that the VM connects to is the same in both OpenStack and OpenShift Virtualization, the VM's *ExternalNet* network IP address in OpenStack can be retained in OpenShift Virtualization as well.
 
-With this the required network configuration mapping for the VM is created. Now the migrated VM can be started by associating it with the created storage and network mappings.
+With this the VM's required network configuration is created in OpenShift Virtualization. Now the migrated VM can be started in OpenShift Virtualization with the newly created storage and network configurations. 
 
-*Note*: In case you want to follow the second method for mapping OpenStack's internal network *Network100*, you need to create another bridge interface and make it available in the *migration* namespace using another *Node Network Configuration Policy* and *Network Attachment Definition* combo.
+*Note*: In case you want to follow the second method for setting up OpenStack's internal network *Network100*, you need to create another bridge interface and make it available in the *migration* namespace using another *Node Network Configuration Policy* and *Network Attachment Definition* combo.
 
 ## Part 4 - Start the migrated VM in OpenShift Virtualization
 
@@ -460,14 +463,11 @@ Once the VM is up and running, reload the web page hosted in the httpd server of
 
 ![image info](./pictures/ocp-website.png)
 
-
 In this way we can migrate a VM from OpenStack to OpenShift virtualization keeping the workloads in the VM intact. 
-
 
 ## Future Work
 
 * Perform warm migration of VMs between OpenStack and OpenShift Virtualization using [Change Block Tracking](https://wiki.openstack.org/wiki/Raksha).
-* **TODO - make it clearer** : Run an Ansible playbook post migration to configure network settings required by the VM
 
 ## References 
 
