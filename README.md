@@ -479,7 +479,7 @@ You can also specify the static IP address that the VM's secondary interface is 
                   - 192.168.11.84/24
 ```
 
-Additional configurations like adding ssh key-pairs, login credentials, restarting NetworkManager, running certain commands on boot, etc. can be added in the ```cloudInitNoCloud-userData``` attribute. Here ```runcmd``` is used to run certain network re-configuration commands specific to the workload runnning in the VM. The commands given under ```runcmd``` here are adding a static route to localhost (0.0.0.0) for the additional external network interface connection that was added previously. This is done so that the web server can be accessed via the VM's secondary network IP address. 
+Additional configurations like adding ssh key-pairs, login credentials, setting network configurations on boot, configuring VM's flavor, etc. can be added in the ```cloudInitNoCloud-userData``` attribute. Here ```runcmd``` is used to run certain network re-configuration commands specific to the workload runnning in the VM. The commands given under ```runcmd``` here are adding a static route to localhost (0.0.0.0) for the additional external network interface connection that was added previously. This is done so that the web server can be accessed via the VM's secondary network IP address. 
 
 ```
         - cloudInitNoCloud:
